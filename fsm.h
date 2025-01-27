@@ -44,6 +44,7 @@ extern "C" {
 // If you don't have stdbool.h or stdint.h, you can define these yourself
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 // Enable/disable debug logging for the internal FSM implementation
 #ifndef FSM_DEBUG
@@ -86,6 +87,12 @@ typedef struct fsm_predicate_group {
     fsm_transition_predicate_fn *predicates;
     fsm_size_t predicate_count;
 } fsm_predicate_group_t;
+
+#define FSM_PREDICATE_GROUP(...)                                                                                      \
+    (fsm_predicate_group_t) {                                                                                         \
+        .predicates = (fsm_transition_predicate_fn[]){__VA_ARGS__},                                                   \
+        .predicate_count = sizeof((fsm_transition_predicate_fn[]){__VA_ARGS__}) / sizeof(fsm_transition_predicate_fn) \
+    }
 
 /// @brief Describes a transition in the FSM
 /// @note This is an internal structure used to store transitions
@@ -140,6 +147,13 @@ void fsm_stop(fsm_t *fsm);
 /// @brief Destroys the FSM, freeing all memory associated with it
 /// @param fsm The FSM to destroy
 void fsm_destroy(fsm_t *fsm);
+
+/// @brief Sets the current state of the FSM
+/// @param fsm The FSM to set the state of
+/// @param state_name The name of the state to set
+/// @note This shouldn't be used to change the state of the FSM, use transitions instead
+///       This is mainly so you can set the initial state of the FSM, which defaults to the first state
+void fsm_set_state(fsm_t *fsm, char *state_name);
 
 /*
  * Note about the fsm_add_xxx functions:
