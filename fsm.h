@@ -1,24 +1,33 @@
 /**========================================================================
+ *
+ *                 ______         _______     _______..___  ___. 
+ *                /      |       |   ____|   /       ||   \/   | 
+ *               |  ,----' ______|  |__     |   (----`|  \  /  | 
+ *               |  |     |______|   __|     \   \    |  |\/|  | 
+ *               |  `----.       |  |    .----)   |   |  |  |  | 
+ *                \______|       |__|    |_______/    |__|  |__| 
+ *                                                    
+ *                                  c-fsm
+ *        A single-header, easy-to-use, and lightweight FSM library in C
+ * 
  * ?                                ABOUT
  * @author         :  Evan Bertis-Sample
  * @email          :  esample21@gmail.com
  * @repo           :  https://github.com/evan-bertis-sample/c-fsm.git
  * @createdOn      :  1/26/2025
  * @description    :  A Finite State Machine (FSM) implementation in C
- *========================================================================**/
-
-/**========================================================================
+ *
  * ?                                USAGE
  * 1. Include "fsm.h" in your project
- * 2. If you want to use the default implementation, define FSM_IMPL before 
+ * 2. If you want to use the default implementation, define FSM_IMPL before
  *    including "fsm.h"
  * 3. Create a new FSM using fsm_create
- * 4. Add states and transitions to the FSM using fsm_add_state and 
+ * 4. Add states and transitions to the FSM using fsm_add_state and
  *    fsm_add_transition
  * 5. Run the FSM using fsm_run
  * 6. Stop the FSM using fsm_stop
  * 7. Destroy the FSM using fsm_destroy
- * 
+ *
  * For exampe usage please refer to:
  * https://github.com/Evan-Bertis-Sample/c-fsm/tree/main/examples
  *========================================================================**/
@@ -59,7 +68,6 @@ typedef struct fsm_state {
     fsm_state_fn on_exit;
 } fsm_state_t;
 
-
 /// @brief Describes a transition in the FSM
 typedef struct fsm_predicate_group {
     fsm_transition_predicate_fn *predicates;
@@ -85,7 +93,7 @@ typedef struct fsm {
 
     fsm_alloc_fn __alloc_fn;
     fsm_dealloc_fn __dealloc_fn;
-    
+
     size_t __context_size;
     fsm_size_t __state_count;
     fsm_size_t __transition_count;
@@ -98,14 +106,14 @@ void fsm_run(fsm_t *fsm);
 void fsm_stop(fsm_t *fsm);
 void fsm_destroy(fsm_t *fsm);
 
-/* 
-* Note about the fsm_add_xxx functions:
-* Whenever you add a state or transition to the FSM, the FSM will take ownership of the memory
-* and will free it when the FSM is destroyed. This means that you should not free the memory.
-* Modifying whatever fsm_state_t or fsm_predicate_group_t you pass to the fsm_add_xxx functions
-* after you pass them to the FSM will not have any effect on the FSM.
-* Instead, a copy of the data will be made and stored in the FSM.
-*/ 
+/*
+ * Note about the fsm_add_xxx functions:
+ * Whenever you add a state or transition to the FSM, the FSM will take ownership of the memory
+ * and will free it when the FSM is destroyed. This means that you should not free the memory.
+ * Modifying whatever fsm_state_t or fsm_predicate_group_t you pass to the fsm_add_xxx functions
+ * after you pass them to the FSM will not have any effect on the FSM.
+ * Instead, a copy of the data will be made and stored in the FSM.
+ */
 
 void fsm_add_state(fsm_t *fsm, fsm_state_t state);
 void fsm_add_transition(fsm_t *fsm, char *from, char *to, fsm_predicate_group_t predicates);
@@ -122,7 +130,6 @@ inline bool fsm_is_running(fsm_t *fsm) { return fsm->__is_running; }
 
 fsm_size_t __fsm_state_index(fsm_t *fsm, char *name);
 fsm_size_t __fsm_transition_index(fsm_t *fsm, char *from, char *to);
-
 
 /**========================================================================
  *                           Macros and Logging
