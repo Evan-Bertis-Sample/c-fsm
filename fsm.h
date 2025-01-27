@@ -1,15 +1,15 @@
 /**========================================================================
  *
- *                 ______         _______     _______..___  ___. 
- *                /      |       |   ____|   /       ||   \/   | 
- *               |  ,----' ______|  |__     |   (----`|  \  /  | 
- *               |  |     |______|   __|     \   \    |  |\/|  | 
- *               |  `----.       |  |    .----)   |   |  |  |  | 
- *                \______|       |__|    |_______/    |__|  |__| 
- *                                                    
+ *                 ______         _______     _______..___  ___.
+ *                /      |       |   ____|   /       ||   \/   |
+ *               |  ,----' ______|  |__     |   (----`|  \  /  |
+ *               |  |     |______|   __|     \   \    |  |\/|  |
+ *               |  `----.       |  |    .----)   |   |  |  |  |
+ *                \______|       |__|    |_______/    |__|  |__|
+ *
  *                                  c-fsm
  *        A single-header, easy-to-use, and lightweight FSM library in C
- * 
+ *
  * ?                                ABOUT
  * @author         :  Evan Bertis-Sample
  * @email          :  esample21@gmail.com
@@ -30,6 +30,7 @@
  *
  * For exampe usage please refer to:
  * https://github.com/Evan-Bertis-Sample/c-fsm/tree/main/examples
+ *
  *========================================================================**/
 
 #ifndef __FSM_H__
@@ -45,16 +46,28 @@ extern "C" {
 #include <stdint.h>
 
 // Enable/disable debug logging for the internal FSM implementation
+#ifndef FSM_DEBUG
 #define FSM_DEBUG 1
+#endif  // FSM_DEBUG
 
 /**========================================================================
  *                           Types and Functions
  *========================================================================**/
 
-struct fsm;
-typedef void (*fsm_state_fn)(struct fsm *fsm, void *context);
-typedef bool (*fsm_transition_predicate_fn)(struct fsm *fsm, void *context);
+/// @brief typedef for size_t, just in case it's not defined
 typedef size_t fsm_size_t;
+
+/// @brief typedef for bool, just in case it's not defined
+typedef bool fsm_bool;
+
+/// @brief Forward declaration of the FSM structure
+struct fsm;
+
+/// @brief Function pointer types for the state functions
+typedef void (*fsm_state_fn)(struct fsm *fsm, void *context);
+
+/// @brief Function pointer type for the transition predicates, which take an fsm, a context, and return a fsm_bool
+typedef fsm_bool (*fsm_transition_predicate_fn)(struct fsm *fsm, void *context);
 
 // typedef allocator/deallocator functions
 typedef void *(*fsm_alloc_fn)(size_t size);
@@ -83,27 +96,49 @@ typedef struct __fsm_transition {
     fsm_predicate_group_t *predicates;
 } __fsm_transition_t;
 
+/// @brief Describes a Finite State Machine
+/// @note This is the main structure used to store the FSM
+/// @note Please interact with the FSM using the functions provided
 typedef struct fsm {
     /// @brief Context passed to state functions, could be anything
     void *context;
+
     /// @brief Array of states in the FSM -- strong reference, we own this memory
     fsm_state_t *states;
+
     /// @brief Array of transitions in the FSM -- strong reference, we own this memory
     __fsm_transition_t *transitions;
 
+    /// @brief Memory allocation function
     fsm_alloc_fn __alloc_fn;
     fsm_dealloc_fn __dealloc_fn;
 
-    size_t __context_size;
+    fsm_size_t __context_size;
     fsm_size_t __state_count;
     fsm_size_t __transition_count;
     fsm_size_t __current_state_idx;
-    bool __is_running;
+
+    fsm_bool __is_running;
 } fsm_t;
 
-fsm_t *fsm_create(fsm_alloc_fn alloc_fn, fsm_dealloc_fn dealloc_fn);
+/// @brief Creates a new FSM, starting with no states or transitions
+/// @param alloc_fn Memory allocation function
+/// @param dealloc_fn Memory deallocation function
+/// @param context Context passed to state functions
+/// @param context_size Size of the context
+/// @return A new FSM, allocated using alloc_fn
+fsm_t *fsm_create(fsm_alloc_fn alloc_fn, fsm_dealloc_fn dealloc_fn, void *context, size_t context_size);
+
+/// @brief Runs the FSM, starting from the first state
+/// @param fsm The FSM to run
 void fsm_run(fsm_t *fsm);
+
+/// @brief Stops the FSM, preventing it from running
+/// @param fsm The FSM to stop
 void fsm_stop(fsm_t *fsm);
+
+/// @brief Destroys the FSM, freeing all memory associated with it
+/// @param fsm The FSM to destroy
 void fsm_destroy(fsm_t *fsm);
 
 /*
@@ -115,20 +150,69 @@ void fsm_destroy(fsm_t *fsm);
  * Instead, a copy of the data will be made and stored in the FSM.
  */
 
+/// @brief Adds a state to the FSM
+/// @param fsm The FSM to add the state to
+/// @param state The state to add
+/// @note The FSM will take ownership of the memory of the state, making a copy of it
 void fsm_add_state(fsm_t *fsm, fsm_state_t state);
+
+/// @brief Adds a transition to the FSM
+/// @param fsm The FSM to add the transition to
+/// @param from The name of the state to transition from
+/// @param to The name of the state to transition to
+/// @param predicates The predicates that must be true for the transition to occur
+/// @note The FSM will take ownership of the memory of the predicates, making a copy of it
 void fsm_add_transition(fsm_t *fsm, char *from, char *to, fsm_predicate_group_t predicates);
+
+/// @brief Adds a transition from all states to a specific state
+/// @param fsm The FSM to add the transition to
+/// @param to The name of the state to transition to
+/// @param predicates The predicates that must be true for the transition to occur
+/// @note The FSM will take ownership of the memory of the predicates, making a copy of it
 void fsm_add_transition_from_all(fsm_t *fsm, char *to, fsm_predicate_group_t predicates);
+
+/// @brief Adds a transition to all states from a specific state
+/// @param fsm The FSM to add the transition to
+/// @param from The name of the state to transition from
+/// @param predicates The predicates that must be true for the transition to occur
+/// @note The FSM will take ownership of the memory of the predicates, making a copy of it
 void fsm_add_transition_to_all(fsm_t *fsm, char *from, fsm_predicate_group_t predicates);
 
+/// @brief Gets the number of states in the FSM
+/// @param fsm The FSM to get the state count of
 inline fsm_size_t fsm_state_count(fsm_t *fsm) { return fsm->__state_count; }
-inline fsm_size_t fsm_transition_count(fsm_t *fsm) { return fsm->__transition_count; }
-inline char *fsm_current_state(fsm_t *fsm) { return fsm->states[fsm->__current_state_idx].name; }
-inline bool fsm_is_running(fsm_t *fsm) { return fsm->__is_running; }
 
-#define FSM_CREATE() fsm_create(malloc, free)
+/// @brief Gets the number of transitions in the FSM
+/// @param fsm The FSM to get the transition count of
+inline fsm_size_t fsm_transition_count(fsm_t *fsm) { return fsm->__transition_count; }
+
+/// @brief Gets the name of the current state of the FSM
+/// @param fsm The FSM to get the current state of
+inline char *fsm_current_state(fsm_t *fsm) { return fsm->states[fsm->__current_state_idx].name; }
+
+/// @brief Checks if the FSM is running
+/// @param fsm The FSM to check if it is running
+inline fsm_bool fsm_is_running(fsm_t *fsm) { return fsm->__is_running; }
+
+/// @brief Creates a new FSM given a context, using malloc and free as alloc/dealloc functions
+#define FSM_CREATE(context) fsm_create(malloc, free, context, sizeof(context))
+
+/// @brief Gets the context of the FSM as a specific type
+/// @param fsm The FSM to get the context of
+/// @param type The type to cast the context to
 #define FSM_GET_CONTEXT(fsm, type) (type *)fsm->context
 
+/// @brief (private_fn) Gets the index of a state in the FSM given its name
+/// @param fsm The FSM to get the state index from
+/// @param name The name of the state to get the index of
+/// @return The index of the state, or -1 if the state does not exist
 fsm_size_t __fsm_state_index(fsm_t *fsm, char *name);
+
+/// @brief (private_fn) Gets the index of a transition in the FSM given the names of the from and to states
+/// @param fsm The FSM to get the transition index from
+/// @param from The name of the state to transition from
+/// @param to The name of the state to transition to
+/// @return The index of the transition, or -1 if the transition does not exist
 fsm_size_t __fsm_transition_index(fsm_t *fsm, char *from, char *to);
 
 /**========================================================================
