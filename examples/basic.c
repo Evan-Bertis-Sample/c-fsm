@@ -1,7 +1,7 @@
 #include <stdio.h>
 
 #define FSM_IMPL
-#include "fsm.h"'
+#include "fsm.h"
 
 fsm_t *g_fsm;
 
@@ -39,7 +39,7 @@ void walk_on_exit(fsm_t *fsm, void *context) {
 }
 
 fsm_bool transition_walk_to_idle(fsm_t *fsm, void *context) {
-    return ((fsm_context_t *)context)->stamina < STAMINA_THRESHOLD;
+    return ((fsm_context_t *)context)->stamina == 0;
 }
 
 fsm_bool transition_idle_to_walk(fsm_t *fsm, void *context) {
@@ -77,8 +77,17 @@ int main() {
     fsm_set_state(g_fsm, "Idle");
 
     while (true) {
-        fsm_update(g_fsm);
+        fsm_run(g_fsm);
+
+        // just wait a sec
+        // very stupid way to do this, but it's just an example
+        for (int i = 0; i < 1000000000; i++) {
+            asm("nop");
+        }
+
     }
+
+    fsm_destroy(g_fsm);
 
     return 0;
 }

@@ -216,19 +216,6 @@ inline fsm_bool fsm_is_running(fsm_t *fsm) { return fsm->__is_running; }
 /// @param type The type to cast the context to
 #define FSM_GET_CONTEXT(fsm, type) (type *)fsm->context
 
-/// @brief (private_fn) Gets the index of a state in the FSM given its name
-/// @param fsm The FSM to get the state index from
-/// @param name The name of the state to get the index of
-/// @return The index of the state, or -1 if the state does not exist
-fsm_size_t __fsm_state_index(fsm_t *fsm, char *name);
-
-/// @brief (private_fn) Gets the index of a transition in the FSM given the names of the from and to states
-/// @param fsm The FSM to get the transition index from
-/// @param from The name of the state to transition from
-/// @param to The name of the state to transition to
-/// @return The index of the transition, or -1 if the transition does not exist
-fsm_size_t __fsm_transition_index(fsm_t *fsm, char *from, char *to);
-
 /**========================================================================
  *                           Macros and Logging
  *========================================================================**/
@@ -254,6 +241,398 @@ fsm_size_t __fsm_transition_index(fsm_t *fsm, char *from, char *to);
  *========================================================================**/
 
 #ifdef FSM_IMPL
+
+#include <stdio.h>   // optional, for debug prints if needed
+#include <string.h>  // for memcpy, strlen, etc.
+
+#include "fsm.h"
+
+/// @brief Copies a string using the FSM's allocator
+/// @param fsm The FSM with the allocator
+/// @param src The string to copy
+/// @return A newly allocated copy of `src`, or NULL on failure
+char *__fsm_strdup(fsm_t *fsm, const char *src) {
+    if (!src) {
+        return NULL;
+    }
+    size_t len = strlen(src) + 1;
+    char *dst = (char *)fsm->__alloc_fn(len);
+    if (dst) {
+        memcpy(dst, src, len);
+    }
+    return dst;
+}
+
+/// @brief Helper to compare state pointers to find index
+fsm_size_t __fsm_state_ptr_index(fsm_t *fsm, fsm_state_t *state_ptr) {
+    for (fsm_size_t i = 0; i < fsm->__state_count; i++) {
+        if (&fsm->states[i] == state_ptr) {
+            return i;
+        }
+    }
+    return (fsm_size_t)-1;  // Not found
+}
+
+fsm_size_t __fsm_state_index(fsm_t *fsm, char *name) {
+    if (!fsm || !name) {
+        return (fsm_size_t)-1;
+    }
+    for (fsm_size_t i = 0; i < fsm->__state_count; i++) {
+        if (fsm->states[i].name && strcmp(fsm->states[i].name, name) == 0) {
+            return i;
+        }
+    }
+    return (fsm_size_t)-1;
+}
+
+fsm_size_t __fsm_transition_index(fsm_t *fsm, char *from, char *to) {
+    if (!fsm || !from || !to) {
+        return (fsm_size_t)-1;
+    }
+    fsm_size_t from_idx = __fsm_state_index(fsm, from);
+    fsm_size_t to_idx = __fsm_state_index(fsm, to);
+    if (from_idx == (fsm_size_t)-1 || to_idx == (fsm_size_t)-1) {
+        return (fsm_size_t)-1;
+    }
+
+    for (fsm_size_t i = 0; i < fsm->__transition_count; i++) {
+        __fsm_transition_t *t = &fsm->transitions[i];
+        // Compare pointer addresses
+        if (t->from == &fsm->states[from_idx] && t->to == &fsm->states[to_idx]) {
+            return i;
+        }
+    }
+    return (fsm_size_t)-1;
+}
+
+fsm_t *fsm_create(fsm_alloc_fn alloc_fn, fsm_dealloc_fn dealloc_fn, void *context, size_t context_size) {
+    if (!alloc_fn || !dealloc_fn) {
+        return NULL;
+    }
+
+    // Allocate the FSM structure
+    fsm_t *fsm = (fsm_t *)alloc_fn(sizeof(fsm_t));
+    if (!fsm) {
+        return NULL;
+    }
+
+    // Initialize everything
+    fsm->context = NULL;
+    fsm->states = NULL;
+    fsm->transitions = NULL;
+
+    fsm->__alloc_fn = alloc_fn;
+    fsm->__dealloc_fn = dealloc_fn;
+
+    fsm->__context_size = context_size;
+    fsm->__state_count = 0;
+    fsm->__transition_count = 0;
+    fsm->__current_state_idx = 0;
+    fsm->__is_running = false;
+
+    // If we have a context and a nonzero size, copy it into FSM->context
+    if (context && context_size > 0) {
+        fsm->context = alloc_fn(context_size);
+        if (fsm->context == NULL) {
+            // Allocation failed, clean up
+            dealloc_fn(fsm);
+            return NULL;
+        }
+        memcpy(fsm->context, context, context_size);
+    }
+
+    return fsm;
+}
+
+void fsm_run(fsm_t *fsm) {
+    if (!fsm) return;
+
+    // If we were not running before, mark running and call on_enter of the current state
+    if (!fsm->__is_running) {
+        if (fsm->__state_count == 0) {
+            // No states? Nothing to run.
+            return;
+        }
+        fsm->__is_running = true;
+
+        fsm_state_t *initial_state = &fsm->states[fsm->__current_state_idx];
+        if (initial_state->on_enter) {
+            initial_state->on_enter(fsm, fsm->context);
+        }
+    }
+
+    // If we're not running for some reason, just return
+    if (!fsm->__is_running) {
+        return;
+    }
+
+    // 1. Identify the current state
+    fsm_state_t *current_state = &fsm->states[fsm->__current_state_idx];
+
+    // 2. Check transitions out of the current state
+    //    We'll apply the first valid transition encountered.
+    for (fsm_size_t i = 0; i < fsm->__transition_count; i++) {
+        __fsm_transition_t *transition = &fsm->transitions[i];
+        if (transition->from == current_state) {
+            // Check if all predicates in transition->predicates are satisfied
+            fsm_bool transition_ok = true;
+            for (fsm_size_t p = 0; p < transition->predicates->predicate_count; p++) {
+                fsm_transition_predicate_fn predicate_fn = transition->predicates->predicates[p];
+                if (!predicate_fn(fsm, fsm->context)) {
+                    transition_ok = false;
+                    break;
+                }
+            }
+
+            // If all predicates are true, perform the transition
+            if (transition_ok) {
+                // on_exit of current state
+                if (current_state->on_exit) {
+                    current_state->on_exit(fsm, fsm->context);
+                }
+
+                // Switch current_state_idx to the transition target
+                fsm_size_t new_idx = __fsm_state_ptr_index(fsm, transition->to);
+                if (new_idx != (fsm_size_t)-1) {
+                    fsm->__current_state_idx = new_idx;
+                }
+
+                // on_enter of new state
+                if (transition->to->on_enter) {
+                    transition->to->on_enter(fsm, fsm->context);
+                }
+
+                // We handle one transition per fsm_run call (break after the first match)
+                break;
+            }
+        }
+    }
+
+    // 3. Call on_update of the (possibly new) current state
+    current_state = &fsm->states[fsm->__current_state_idx];
+    if (current_state->on_update) {
+        current_state->on_update(fsm, fsm->context);
+    }
+}
+
+void fsm_stop(fsm_t *fsm) {
+    if (!fsm) return;
+    if (!fsm->__is_running) return;
+
+    fsm->__is_running = false;
+
+    // Optionally, you could invoke the on_exit handler here if desired:
+    /*
+    fsm_state_t *current_state = &fsm->states[fsm->__current_state_idx];
+    if (current_state->on_exit) {
+        current_state->on_exit(fsm, fsm->context);
+    }
+    */
+}
+
+void fsm_destroy(fsm_t *fsm) {
+    if (!fsm) return;
+
+    // Free states
+    if (fsm->states) {
+        // Free each state's name
+        for (fsm_size_t i = 0; i < fsm->__state_count; i++) {
+            if (fsm->states[i].name) {
+                fsm->__dealloc_fn(fsm->states[i].name);
+                fsm->states[i].name = NULL;
+            }
+        }
+        fsm->__dealloc_fn(fsm->states);
+        fsm->states = NULL;
+    }
+
+    // Free transitions
+    if (fsm->transitions) {
+        for (fsm_size_t i = 0; i < fsm->__transition_count; i++) {
+            __fsm_transition_t *t = &fsm->transitions[i];
+            // Free the predicates array if it exists
+            if (t->predicates) {
+                if (t->predicates->predicates) {
+                    fsm->__dealloc_fn(t->predicates->predicates);
+                }
+                fsm->__dealloc_fn(t->predicates);
+                t->predicates = NULL;
+            }
+        }
+        fsm->__dealloc_fn(fsm->transitions);
+        fsm->transitions = NULL;
+    }
+
+    // Free context
+    if (fsm->context) {
+        fsm->__dealloc_fn(fsm->context);
+        fsm->context = NULL;
+    }
+
+    // Finally, free the FSM structure itself
+    fsm->__dealloc_fn(fsm);
+}
+
+void fsm_set_state(fsm_t *fsm, char *state_name) {
+    if (!fsm || !state_name || fsm->__state_count == 0) {
+        return;
+    }
+
+    fsm_size_t idx = __fsm_state_index(fsm, state_name);
+    if (idx == (fsm_size_t)-1) {
+        // State not found
+        return;
+    }
+
+    // If the FSM is running and we have a different current state, handle on_exit/ on_enter
+    if (fsm->__is_running && idx != fsm->__current_state_idx) {
+        fsm_state_t *old_state = &fsm->states[fsm->__current_state_idx];
+        fsm_state_t *new_state = &fsm->states[idx];
+
+        if (old_state->on_exit) {
+            old_state->on_exit(fsm, fsm->context);
+        }
+        fsm->__current_state_idx = idx;
+        if (new_state->on_enter) {
+            new_state->on_enter(fsm, fsm->context);
+        }
+    } else {
+        // Not running, or same index, just set it
+        fsm->__current_state_idx = idx;
+    }
+}
+
+void fsm_add_state(fsm_t *fsm, fsm_state_t state) {
+    if (!fsm) return;
+
+    // Allocate space for one more state
+    fsm_size_t new_count = fsm->__state_count + 1;
+    fsm_state_t *new_states = (fsm_state_t *)fsm->__alloc_fn(sizeof(fsm_state_t) * new_count);
+    if (!new_states) {
+        return;  // Allocation failed
+    }
+
+    // Copy the old states
+    if (fsm->states) {
+        memcpy(new_states, fsm->states, sizeof(fsm_state_t) * fsm->__state_count);
+        fsm->__dealloc_fn(fsm->states);
+        fsm->states = NULL;
+    }
+
+    fsm->states = new_states;
+
+    // Initialize the new state at the end
+    fsm_size_t idx = fsm->__state_count;
+    fsm->states[idx].name = __fsm_strdup(fsm, state.name);
+    fsm->states[idx].on_enter = state.on_enter;
+    fsm->states[idx].on_update = state.on_update;
+    fsm->states[idx].on_exit = state.on_exit;
+
+    fsm->__state_count = new_count;
+}
+
+void fsm_add_transition(fsm_t *fsm, char *from, char *to, fsm_predicate_group_t predicates) {
+    if (!fsm || !from || !to) {
+        return;
+    }
+
+    // Find the 'from' state index
+    fsm_size_t from_idx = __fsm_state_index(fsm, from);
+    fsm_size_t to_idx = __fsm_state_index(fsm, to);
+    if (from_idx == (fsm_size_t)-1 || to_idx == (fsm_size_t)-1) {
+        return;  // Invalid states
+    }
+
+    // Allocate space for one more transition
+    fsm_size_t new_count = fsm->__transition_count + 1;
+    __fsm_transition_t *new_transitions =
+        (__fsm_transition_t *)fsm->__alloc_fn(sizeof(__fsm_transition_t) * new_count);
+    if (!new_transitions) {
+        return;  // Allocation failed
+    }
+
+    // Copy the old transitions
+    if (fsm->transitions) {
+        memcpy(new_transitions, fsm->transitions,
+               sizeof(__fsm_transition_t) * fsm->__transition_count);
+        fsm->__dealloc_fn(fsm->transitions);
+        fsm->transitions = NULL;
+    }
+
+    fsm->transitions = new_transitions;
+
+    // Set up the new transition
+    __fsm_transition_t *t = &fsm->transitions[fsm->__transition_count];
+    t->from = &fsm->states[from_idx];
+    t->to = &fsm->states[to_idx];
+
+    // Copy predicate group
+    t->predicates = (fsm_predicate_group_t *)fsm->__alloc_fn(sizeof(fsm_predicate_group_t));
+    if (!t->predicates) {
+        // roll back?
+        // For simplicity, do nothing more here. If you want to be robust, handle partial failures.
+        return;
+    }
+
+    // Copy the array of predicate functions
+    t->predicates->predicate_count = predicates.predicate_count;
+    size_t pred_array_size = sizeof(fsm_transition_predicate_fn) * predicates.predicate_count;
+    t->predicates->predicates =
+        (fsm_transition_predicate_fn *)fsm->__alloc_fn(pred_array_size);
+    if (!t->predicates->predicates) {
+        // Similarly, handle partial fail if desired
+        return;
+    }
+
+    memcpy(t->predicates->predicates, predicates.predicates, pred_array_size);
+
+    fsm->__transition_count = new_count;
+}
+
+void fsm_add_transition_from_all(fsm_t *fsm, char *to, fsm_predicate_group_t predicates) {
+    if (!fsm || !to || fsm->__state_count == 0) {
+        return;
+    }
+
+    fsm_size_t to_idx = __fsm_state_index(fsm, to);
+    if (to_idx == (fsm_size_t)-1) {
+        return;  // Invalid target
+    }
+
+    // For each state in the FSM, add a transition to the "to" state
+    for (fsm_size_t i = 0; i < fsm->__state_count; i++) {
+        // Avoid creating self-transitions if undesired.  If you want to allow
+        // from==to transitions, remove this check:
+        /*
+        if (i == to_idx) {
+            continue;
+        }
+        */
+        fsm_add_transition(fsm, fsm->states[i].name, to, predicates);
+    }
+}
+
+void fsm_add_transition_to_all(fsm_t *fsm, char *from, fsm_predicate_group_t predicates) {
+    if (!fsm || !from || fsm->__state_count == 0) {
+        return;
+    }
+
+    fsm_size_t from_idx = __fsm_state_index(fsm, from);
+    if (from_idx == (fsm_size_t)-1) {
+        return;  // Invalid origin
+    }
+
+    // For each state in the FSM, add a transition from the "from" state
+    for (fsm_size_t i = 0; i < fsm->__state_count; i++) {
+        // Avoid creating self-transitions if undesired:
+        /*
+        if (i == from_idx) {
+            continue;
+        }
+        */
+        fsm_add_transition(fsm, from, fsm->states[i].name, predicates);
+    }
+}
 
 #endif  // FSM_IMPL
 
