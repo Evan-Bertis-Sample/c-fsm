@@ -7,6 +7,22 @@
  * @description    :  A Finite State Machine (FSM) implementation in C
  *========================================================================**/
 
+/**========================================================================
+ * ?                                USAGE
+ * 1. Include "fsm.h" in your project
+ * 2. If you want to use the default implementation, define FSM_IMPL before 
+ *    including "fsm.h"
+ * 3. Create a new FSM using fsm_create
+ * 4. Add states and transitions to the FSM using fsm_add_state and 
+ *    fsm_add_transition
+ * 5. Run the FSM using fsm_run
+ * 6. Stop the FSM using fsm_stop
+ * 7. Destroy the FSM using fsm_destroy
+ * 
+ * For exampe usage please refer to:
+ * https://github.com/Evan-Bertis-Sample/c-fsm/tree/main/examples
+ *========================================================================**/
+
 #ifndef __FSM_H__
 #define __FSM_H__
 
@@ -14,10 +30,17 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Only used for bool & size_t
+// If you don't have stdbool.h or stdint.h, you can define these yourself
 #include <stdbool.h>
 #include <stdint.h>
 
+// Enable/disable debug logging for the internal FSM implementation
 #define FSM_DEBUG 1
+
+/**========================================================================
+ *                           Types and Functions
+ *========================================================================**/
 
 struct fsm;
 typedef void (*fsm_state_fn)(struct fsm *fsm, void *context);
@@ -32,6 +55,7 @@ typedef void (*fsm_dealloc_fn)(void *ptr);
 typedef struct fsm_state {
     char *name;
     fsm_state_fn on_enter;
+    fsm_state_fn on_update;
     fsm_state_fn on_exit;
 } fsm_state_t;
 
@@ -52,8 +76,8 @@ typedef struct __fsm_transition {
 } __fsm_transition_t;
 
 typedef struct fsm {
+    /// @brief Context passed to state functions, could be anything
     void *context;
-
     /// @brief Array of states in the FSM -- strong reference, we own this memory
     fsm_state_t *states;
     /// @brief Array of transitions in the FSM -- strong reference, we own this memory
@@ -61,7 +85,7 @@ typedef struct fsm {
 
     fsm_alloc_fn __alloc_fn;
     fsm_dealloc_fn __dealloc_fn;
-
+    
     size_t __context_size;
     fsm_size_t __state_count;
     fsm_size_t __transition_count;
@@ -93,11 +117,16 @@ inline fsm_size_t fsm_transition_count(fsm_t *fsm) { return fsm->__transition_co
 inline char *fsm_current_state(fsm_t *fsm) { return fsm->states[fsm->__current_state_idx].name; }
 inline bool fsm_is_running(fsm_t *fsm) { return fsm->__is_running; }
 
+#define FSM_CREATE() fsm_create(malloc, free)
+#define FSM_GET_CONTEXT(fsm, type) (type *)fsm->context
 
 fsm_size_t __fsm_state_index(fsm_t *fsm, char *name);
 fsm_size_t __fsm_transition_index(fsm_t *fsm, char *from, char *to);
 
-#define FSM_CREATE() fsm_create(malloc, free)
+
+/**========================================================================
+ *                           Macros and Logging
+ *========================================================================**/
 
 #define FSM_LINE __LINE__
 #define FSM_STR_HELPER(x) #x
@@ -114,6 +143,10 @@ fsm_size_t __fsm_transition_index(fsm_t *fsm, char *from, char *to);
 #define FSM_LOG(fmt, ...) void(0)
 #define FSM_LOG_ERROR(fmt, ...) void(0)
 #endif  // FSM_DEBUG
+
+/**========================================================================
+ *                           Implementation
+ *========================================================================**/
 
 #ifdef FSM_IMPL
 
