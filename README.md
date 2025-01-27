@@ -24,6 +24,18 @@ Alternatively, you can run the examples manually by running the following comman
 ./build/<example_name>.exe
 ```
 
+## Adding to Your Project
+Just copy the `fsm.h` file to your project and include it in your source files.
+
+Then, in one of your source files, define the implementation of the FSM:
+
+```c
+#define FSM_IMPL
+#include "fsm.h"
+```
+
+This will include the implementation of the FSM in that source file. You can include the header file in as many source files as you want, but you should only define the implementation in one of them. This practice is taken from the STB libraries, and it is probably the easiest way to develop a simple library like this.
+
 ## Usage Example
 Documentation is still underway, but here is a simple example of how to use the FSM:
 
